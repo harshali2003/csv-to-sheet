@@ -14,51 +14,49 @@ try:
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-    # Get existing data
-    existing_data = sheet.get_all_values()
-    existing_headers = existing_data[0] if existing_data else []
-    uploaded_dates = set(row[0] for row in existing_data[1:]) if len(existing_data) > 1 else set()
-
-    # Read CSV (no header)
+    # Read raw CSV (no header)
     raw = pd.read_csv(CSV_URL, header=None)
     num_columns = raw.shape[1]
     num_rows = raw.shape[0]
 
-    rows_to_upload = []
+    blocks = []
 
-    for col in range(0, num_columns, 10):  # 8 data columns + 2 gaps
+    for col in range(0, num_columns, 10):  # 8 data cols + 2 gap
         if pd.isna(raw.iloc[0, col]):
             continue
 
-        # Read headers
-        headers = [str(raw.iloc[0, col + i]).strip() for i in range(8)]
+        block = []
+        for row in range(num_rows):
+            if pd.isna(raw.iloc[row, col]):
+                break
+            block.append([str(raw.iloc[row, col + i]).strip() for i in range(8)])
+        blocks.append(block)
 
-        # Only write headers once
-        if not existing_headers:
-            sheet.append_row(headers)
-            existing_headers = headers
+    # Reverse blocks: latest date first
+    blocks.reverse()
 
-        # Loop through all rows starting from row 1 (data rows)
-        for row_idx in range(1, num_rows):
-            if pd.isna(raw.iloc[row_idx, col]):
-                break  # End of data block
+    # Pad all blocks to have same height
+    max_height = max(len(block) for block in blocks)
+    for i in range(len(blocks)):
+        while len(blocks[i]) < max_height:
+            blocks[i].append([""] * 8)
 
-            values = [str(raw.iloc[row_idx, col + i]).strip() for i in range(8)]
-            date = values[0]
+    # Build final sheet grid
+    final_data = []
+    for row_idx in range(max_height):
+        row = []
+        for block in blocks:
+            row.extend(block[row_idx])
+            row.extend(["", ""])  # 2 column gap
+        final_data.append(row)
 
-            # Skip if already uploaded
-            if date in uploaded_dates:
-                continue
+    # Clear existing sheet
+    sheet.clear()
 
-            rows_to_upload.append(values)
+    # Push final data
+    sheet.update("A1", final_data)
 
-    # Older dates first
-    rows_to_upload.reverse()
-
-    for row in rows_to_upload:
-        sheet.append_row(row)
-
-    print(f"✅ {len(rows_to_upload)} new rows added.")
+    print(f"✅ Sheet updated with {len(blocks)} blocks and {len(final_data)} rows.")
 
 except Exception as e:
     print(f"❌ ERROR: {e}")
