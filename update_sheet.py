@@ -1,7 +1,7 @@
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from gspread_formatting import batch_update, set_column_width, CellFormat, format_cell_range
+from gspread_formatting import set_column_width, CellFormat, format_cell_range
 from gspread_formatting.dataframe import format_with_dataframe
 from gspread_formatting import Borders, Color, TextFormat, set_frozen
 
