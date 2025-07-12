@@ -28,7 +28,7 @@ try:
     new_rows = []
 
     for _, row in df.iterrows():
-        if row['date'] == latest_uploaded_date:
+        if row['Date'] == latest_uploaded_date:
             break
         new_rows.append(row.tolist())
 
