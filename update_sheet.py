@@ -17,33 +17,42 @@ try:
     # Get existing data
     existing_data = sheet.get_all_values()
     existing_headers = existing_data[0] if existing_data else []
-    latest_uploaded_date = existing_data[-1][0] if len(existing_data) > 1 else None
+    uploaded_dates = set(row[0] for row in existing_data[1:]) if len(existing_data) > 1 else set()
 
-    # Read the CSV without header
+    # Read CSV (no header)
     raw = pd.read_csv(CSV_URL, header=None)
     num_columns = raw.shape[1]
+    num_rows = raw.shape[0]
 
     rows_to_upload = []
 
-    for col in range(0, num_columns, 10):  # 8 columns of data + 2 gap
+    for col in range(0, num_columns, 10):  # 8 data columns + 2 gaps
         if pd.isna(raw.iloc[0, col]):
             continue
 
-        # Extract headers and values
+        # Read headers
         headers = [str(raw.iloc[0, col + i]).strip() for i in range(8)]
-        values = [str(raw.iloc[1, col + i]).strip() for i in range(8)]
 
-        date = values[0]
-        if date == latest_uploaded_date:
-            break
-
-        # Write headers if sheet is empty
+        # Only write headers once
         if not existing_headers:
             sheet.append_row(headers)
             existing_headers = headers
 
-        rows_to_upload.append(values)
+        # Loop through all rows starting from row 1 (data rows)
+        for row_idx in range(1, num_rows):
+            if pd.isna(raw.iloc[row_idx, col]):
+                break  # End of data block
 
+            values = [str(raw.iloc[row_idx, col + i]).strip() for i in range(8)]
+            date = values[0]
+
+            # Skip if already uploaded
+            if date in uploaded_dates:
+                continue
+
+            rows_to_upload.append(values)
+
+    # Older dates first
     rows_to_upload.reverse()
 
     for row in rows_to_upload:
