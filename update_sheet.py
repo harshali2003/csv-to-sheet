@@ -14,30 +14,42 @@ try:
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-    # Get latest uploaded date
+    # Get existing data
     existing_data = sheet.get_all_values()
+    existing_headers = existing_data[0] if existing_data else []
+    latest_uploaded_date = existing_data[-1][0] if len(existing_data) > 1 else None
 
-    if len(existing_data) < 2:
-        latest_uploaded_date = None
-    else:
-        latest_uploaded_date = existing_data[1][0]
+    # Read the CSV without header
+    raw = pd.read_csv(CSV_URL, header=None)
+    num_columns = raw.shape[1]
 
-    # Read CSV
-    df = pd.read_csv(CSV_URL)
-    df = df.astype(str)
-    new_rows = []
+    rows_to_upload = []
 
-    for _, row in df.iterrows():
-        if row['Date'] == latest_uploaded_date:
+    for col in range(0, num_columns, 10):  # 8 columns of data + 2 gap
+        if pd.isna(raw.iloc[0, col]):
+            continue
+
+        # Extract headers and values
+        headers = [str(raw.iloc[0, col + i]).strip() for i in range(8)]
+        values = [str(raw.iloc[1, col + i]).strip() for i in range(8)]
+
+        date = values[0]
+        if date == latest_uploaded_date:
             break
-        new_rows.append(row.tolist())
 
-    new_rows.reverse()
+        # Write headers if sheet is empty
+        if not existing_headers:
+            sheet.append_row(headers)
+            existing_headers = headers
 
-    for row in new_rows:
+        rows_to_upload.append(values)
+
+    rows_to_upload.reverse()
+
+    for row in rows_to_upload:
         sheet.append_row(row)
 
-    print(f"✅ {len(new_rows)} new rows added.")
+    print(f"✅ {len(rows_to_upload)} new rows added.")
 
 except Exception as e:
     print(f"❌ ERROR: {e}")
