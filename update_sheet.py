@@ -9,14 +9,28 @@ CSV_URL = "https://raw.githubusercontent.com/harshali2003/csv-to-sheet/refs/head
 SPREADSHEET_ID = "1_XanKnA9VBUVkF8O729Dp-LK-tuH_4y34-lGKme4b1U"
 CREDENTIALS_FILE = "creds.json"
 
+# Helper function to convert values to numbers if possible
+def parse_value(val):
+    try:
+        val_str = str(val).strip()
+        if val_str == "":
+            return ""
+        return int(val_str) if val_str.isdigit() else float(val_str)
+    except:
+        return str(val).strip()
+
 try:
     # Setup Sheets API
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/spreadsheets"
+    ]
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-    # For Google API client
+    # Google API client
     scoped_creds = GoogleCredentials.from_service_account_file(CREDENTIALS_FILE, scopes=scope)
     service = build("sheets", "v4", credentials=scoped_creds)
 
@@ -35,11 +49,7 @@ try:
         for row in range(1, num_rows):  # Skip header row
             if pd.isna(raw.iloc[row, col]):
                 break
-            block.append([
-    raw.iloc[row, col + i] if pd.notna(raw.iloc[row, col + i]) and str(raw.iloc[row, col + i]).strip().replace('.', '', 1).isdigit()
-    else str(raw.iloc[row, col + i]).strip()
-    for i in range(1, 8)
-])  # skip 'date' col
+            block.append([parse_value(raw.iloc[row, col + i]) for i in range(1, 8)])  # Skip 'date' column
         blocks.append(block)
 
     # Reverse blocks: latest first
