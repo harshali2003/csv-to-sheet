@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas gspread oauth2client gspread-formatting
+          pip install pandas gspread oauth2client gspread-formatting google-api-python-client google-auth
 
       - name: Write credentials to file
         run: echo '${{ secrets.GSHEETS_CREDS }}' > creds.json
