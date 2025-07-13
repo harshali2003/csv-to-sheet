@@ -27,7 +27,7 @@ try:
 
     blocks = []
 
-    for col in range(1, num_columns, 10):  # 8 data cols + 2 gaps
+    for col in range(0, num_columns, 10):  # 8 data cols + 2 gaps
         if pd.isna(raw.iloc[0, col]):
             continue
 
@@ -35,7 +35,7 @@ try:
         for row in range(num_rows):
             if pd.isna(raw.iloc[row, col]):
                 break
-            block.append([str(raw.iloc[row, col + i]).strip() for i in range(7)])
+            block.append([str(raw.iloc[row, col + i]).strip() for i in range(8)])
         blocks.append(block)
 
     # Reverse blocks: latest first
@@ -45,13 +45,13 @@ try:
     max_height = max(len(block) for block in blocks)
     for i in range(len(blocks)):
         while len(blocks[i]) < max_height:
-            blocks[i].append([""] * 7)
+            blocks[i].append([""] * 8)
 
     # Create top row with merged date labels
     top_row = []
     for block in blocks:
         date = block[1][0]  # first data row's date
-        top_row.extend([date] + [""] * 6)
+        top_row.extend([date] + [""] * 7)
         top_row.extend(["", ""])  # 2 gap columns
 
     # Create second row with headers
@@ -87,12 +87,12 @@ try:
                     "startRowIndex": 0,
                     "endRowIndex": 1,
                     "startColumnIndex": col_index,
-                    "endColumnIndex": col_index + 7
+                    "endColumnIndex": col_index + 8
                 },
                 "mergeType": "MERGE_ALL"
             }
         })
-        col_index += 9  # 8 data + 2 gap
+        col_index += 10  # 8 data + 2 gap
 
     # Execute merge requests
     if requests:
