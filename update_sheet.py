@@ -50,7 +50,7 @@ try:
     # Create top row with merged date labels
     top_row = []
     for block in blocks:
-        date = block[1][0]  # first data row's date
+        date = block[0][0]  # first data row's date
         top_row.extend([date] + [""] * 7)
         top_row.extend(["", ""])  # 2 gap columns
 
