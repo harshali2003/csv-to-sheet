@@ -3,27 +3,28 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials as GoogleCredentials
+import copy
 
 # CONFIG
 CSV_URL = "https://raw.githubusercontent.com/harshali2003/csv-to-sheet/refs/heads/main/dev-int.csv"
 SPREADSHEET_ID = "1_XanKnA9VBUVkF8O729Dp-LK-tuH_4y34-lGKme4b1U"
 CREDENTIALS_FILE = "creds.json"
 
-def parse_cell(val):
-    """Convert strings to numbers when possible."""
+# Constants
+START_COL = 9  # Column J (0-indexed)
+BLOCK_WIDTH = 9  # 7 data + 2 gap
+
+def convert_cell(val):
     try:
-        val = str(val).strip()
-        if val == "":
-            return ""
-        num = float(val)
-        if num.is_integer():
-            return int(num)
-        return num
+        f = float(val)
+        if f.is_integer():
+            return int(f)
+        return f
     except:
-        return str(val)
+        return str(val).strip()
 
 try:
-    # Setup Sheets API
+    # Setup Google Sheets APIs
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
@@ -32,91 +33,82 @@ try:
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
-
     scoped_creds = GoogleCredentials.from_service_account_file(CREDENTIALS_FILE, scopes=scope)
     service = build("sheets", "v4", credentials=scoped_creds)
 
-    # Read raw CSV (no header)
+    # Read the CSV (assuming it has one block only)
     raw = pd.read_csv(CSV_URL, header=None)
-    num_columns = raw.shape[1]
-    num_rows = raw.shape[0]
+    if raw.shape[1] < 8 or raw.shape[0] < 2:
+        raise ValueError("CSV block is incomplete or malformed.")
 
-    blocks = []
-
-    for col in range(0, num_columns, 10):  # 8 data cols + 2 gaps
-        if pd.isna(raw.iloc[0, col]):
-            continue
-
-        block = []
-        for row in range(1, num_rows):  # Skip header row
-            if pd.isna(raw.iloc[row, col]):
-                break
-            block.append([parse_cell(raw.iloc[row, col + i]) for i in range(1, 8)])  # Skip date column
-        blocks.append(block)
-
-    # Pad all blocks to same height
-    max_height = max(len(block) for block in blocks)
-    for i in range(len(blocks)):
-        while len(blocks[i]) < max_height:
-            blocks[i].append([""] * 7)
-
-    # Create top row with merged date labels
-    top_row = []
-    for col in range(0, num_columns, 10):
-        if pd.isna(raw.iloc[1, col]):
-            continue
-        date = str(raw.iloc[1, col]).strip()
-        top_row.extend([date] + [""] * 6)
-        top_row.extend(["", ""])
-
-    # Header row (skip date col)
-    header_row = []
-    for col in range(0, num_columns, 10):
-        if pd.isna(raw.iloc[0, col]):
-            continue
-        header_row.extend([str(raw.iloc[0, col + i]).strip() for i in range(1, 8)])
-        header_row.extend(["", ""])
-
-    # Data rows
+    # Parse top label and headers
+    date_label = str(raw.iloc[1, 0]).strip()
+    header_row = [str(raw.iloc[0, i]).strip() for i in range(1, 8)]
+    
+    # Parse data
     data_rows = []
-    for row_idx in range(max_height):
-        row = []
-        for block in blocks:
-            row.extend(block[row_idx])
-            row.extend(["", ""])
+    for i in range(1, raw.shape[0]):
+        if pd.isna(raw.iloc[i, 0]):
+            break
+        row = [convert_cell(raw.iloc[i, j]) for j in range(1, 8)]
         data_rows.append(row)
 
-    final_data = [top_row, header_row] + data_rows
+    max_height = len(data_rows)
+    
+    # Read existing sheet content
+    existing_data = sheet.get_all_values()
+    while len(existing_data) < max_height + 2:
+        existing_data.append([])
 
-    # Push to Google Sheet
-    sheet.clear()
-    sheet.update("A1", final_data)
+    # Extend all rows to match existing + new block width
+    for i in range(len(existing_data)):
+        while len(existing_data[i]) < START_COL:
+            existing_data[i].append("")
 
-    # Merge date headers
-    requests = []
-    col_index = 0
-    for _ in blocks:
-        requests.append({
-            "mergeCells": {
-                "range": {
-                    "sheetId": sheet._properties["sheetId"],
-                    "startRowIndex": 0,
-                    "endRowIndex": 1,
-                    "startColumnIndex": col_index,
-                    "endColumnIndex": col_index + 7
-                },
-                "mergeType": "MERGE_ALL"
-            }
-        })
-        col_index += 9  # 7 data + 2 gaps
+    # Shift existing content to the right
+    for i in range(len(existing_data)):
+        row = existing_data[i]
+        old_tail = row[START_COL:]
+        gap = [""] * BLOCK_WIDTH
+        row[START_COL:] = gap + old_tail
 
-    if requests:
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body={"requests": requests}
-        ).execute()
+    # Insert top label row
+    if len(existing_data[0]) < START_COL + 7:
+        existing_data[0] += [""] * (START_COL + 7 - len(existing_data[0]) + 2)
+    existing_data[0][START_COL] = date_label
 
-    print(f"✅ Sheet updated with proper headers and {len(data_rows)} data rows.")
+    # Insert header row
+    for j in range(7):
+        existing_data[1][START_COL + j] = header_row[j]
+
+    # Insert data
+    for r in range(max_height):
+        for c in range(7):
+            existing_data[r + 2][START_COL + c] = data_rows[r][c]
+
+    # Update sheet without clearing
+    sheet.update("A1", existing_data)
+
+    # Merge date header
+    requests = [{
+        "mergeCells": {
+            "range": {
+                "sheetId": sheet._properties["sheetId"],
+                "startRowIndex": 0,
+                "endRowIndex": 1,
+                "startColumnIndex": START_COL,
+                "endColumnIndex": START_COL + 7
+            },
+            "mergeType": "MERGE_ALL"
+        }
+    }]
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=SPREADSHEET_ID,
+        body={"requests": requests}
+    ).execute()
+
+    print(f"✅ New block inserted at column {chr(START_COL + 65)} successfully.")
 
 except Exception as e:
     print(f"❌ ERROR: {e}")
