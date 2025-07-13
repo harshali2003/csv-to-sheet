@@ -9,13 +9,28 @@ CSV_URL = "https://raw.githubusercontent.com/harshali2003/csv-to-sheet/refs/head
 SPREADSHEET_ID = "1_XanKnA9VBUVkF8O729Dp-LK-tuH_4y34-lGKme4b1U"
 CREDENTIALS_FILE = "creds.json"
 
+# Helper function to convert values to numbers if possible
+def parse_value(val):
+    try:
+        val_str = str(val).strip()
+        if val_str == "":
+            return ""
+        return int(val_str) if val_str.isdigit() else float(val_str)
+    except:
+        return str(val).strip()
+
 try:
     # Setup Sheets API
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/spreadsheets"
+    ]
     creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
+    # Google API client
     scoped_creds = GoogleCredentials.from_service_account_file(CREDENTIALS_FILE, scopes=scope)
     service = build("sheets", "v4", credentials=scoped_creds)
 
@@ -26,22 +41,18 @@ try:
 
     blocks = []
 
-    for col in range(0, num_columns, 10):  # 8 data cols + 2 gap
+    for col in range(0, num_columns, 10):  # 8 data cols + 2 gaps
         if pd.isna(raw.iloc[0, col]):
             continue
 
         block = []
-        for row in range(1, num_rows):  # skip header
+        for row in range(1, num_rows):  # Skip header row
             if pd.isna(raw.iloc[row, col]):
                 break
-            block.append([
-                float(raw.iloc[row, col + i]) if pd.notna(raw.iloc[row, col + i]) and str(raw.iloc[row, col + i]).strip().replace('.', '', 1).isdigit()
-                else str(raw.iloc[row, col + i]).strip()
-                for i in range(1, 8)
-            ])
+            block.append([parse_value(raw.iloc[row, col + i]) for i in range(1, 8)])  # Skip 'date' column
         blocks.append(block)
 
-    # Reverse blocks so latest is last
+    # Reverse blocks: latest first
     blocks.reverse()
 
     # Pad all blocks to same height
@@ -50,85 +61,55 @@ try:
         while len(blocks[i]) < max_height:
             blocks[i].append([""] * 7)
 
-    # Get current column count (from sheet)
-    sheet_data = sheet.get_all_values()
-    existing_col_count = len(sheet_data[0]) if sheet_data else 0
+    # Top row with merged date labels (get actual date from row 1, col 0)
+    top_row = []
+    for col in range(0, num_columns, 10):
+        if pd.isna(raw.iloc[1, col]):  # skip if no date
+            continue
+        date = str(raw.iloc[1, col]).strip()
+        top_row.extend([date] + [""] * 6)
+        top_row.extend(["", ""])
 
-    # Find next start column (must be ≥ 9 to protect A–I)
-    start_col = max(existing_col_count, 9)
+    # Header row (skip date col)
+    header_row = []
+    for col in range(0, num_columns, 10):
+        if pd.isna(raw.iloc[0, col]):
+            continue
+        header_row.extend([str(raw.iloc[0, col + i]).strip() for i in range(1, 8)])
+        header_row.extend(["", ""])
 
+    # Data rows
+    data_rows = []
+    for row_idx in range(max_height):
+        row = []
+        for block in blocks:
+            row.extend(block[row_idx])
+            row.extend(["", ""])
+        data_rows.append(row)
+
+    final_data = [top_row, header_row] + data_rows
+
+    # Push data
+    sheet.clear()
+    sheet.update("A1", final_data)
+
+    # Merge date headers
     requests = []
-
-    for block in blocks:
-        date = str(block[0][0])  # first data row's date (in date cell)
-
-        # Prepare top row
-        top_row = [date] + [""] * 6
-        header_row = [str(raw.iloc[0, i + 1]).strip() for i in range(7)]  # skip date col
-
-        # Insert top row
-        requests.append({
-            "updateCells": {
-                "rows": [{"values": [{"userEnteredValue": {"stringValue": cell}} for cell in top_row]}],
-                "fields": "*",
-                "start": {
-                    "sheetId": sheet._properties["sheetId"],
-                    "rowIndex": 0,
-                    "columnIndex": start_col
-                }
-            }
-        })
-
-        # Merge date cell
+    col_index = 0
+    for _ in blocks:
         requests.append({
             "mergeCells": {
                 "range": {
                     "sheetId": sheet._properties["sheetId"],
                     "startRowIndex": 0,
                     "endRowIndex": 1,
-                    "startColumnIndex": start_col,
-                    "endColumnIndex": start_col + 7
+                    "startColumnIndex": col_index,
+                    "endColumnIndex": col_index + 7
                 },
                 "mergeType": "MERGE_ALL"
             }
         })
-
-        # Insert header row
-        requests.append({
-            "updateCells": {
-                "rows": [{"values": [{"userEnteredValue": {"stringValue": cell}} for cell in header_row]}],
-                "fields": "*",
-                "start": {
-                    "sheetId": sheet._properties["sheetId"],
-                    "rowIndex": 1,
-                    "columnIndex": start_col
-                }
-            }
-        })
-
-        # Insert data rows
-        for i in range(max_height - 1):
-            row_data = block[i + 1]
-            cell_values = []
-            for val in row_data:
-                if isinstance(val, float) or isinstance(val, int):
-                    cell_values.append({"userEnteredValue": {"numberValue": float(val)}})
-                else:
-                    cell_values.append({"userEnteredValue": {"stringValue": val}})
-            requests.append({
-                "updateCells": {
-                    "rows": [{"values": cell_values}],
-                    "fields": "*",
-                    "start": {
-                        "sheetId": sheet._properties["sheetId"],
-                        "rowIndex": i + 2,
-                        "columnIndex": start_col
-                    }
-                }
-            })
-
-        # Move to next block (7 cols data + 2 gap)
-        start_col += 9
+        col_index += 9  # 7 data + 2 gap
 
     if requests:
         service.spreadsheets().batchUpdate(
@@ -136,7 +117,7 @@ try:
             body={"requests": requests}
         ).execute()
 
-    print("✅ Sheet updated without touching static columns A–I.")
+    print(f"✅ Sheet updated with proper headers and {len(data_rows)} data rows.")
 
 except Exception as e:
     print(f"❌ ERROR: {e}")
