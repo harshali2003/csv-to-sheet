@@ -32,14 +32,14 @@ try:
             continue
 
         block = []
-        for row in range(num_rows):
+        for row in range(1, num_rows):  # Skip header row
             if pd.isna(raw.iloc[row, col]):
                 break
-            block.append([str(raw.iloc[row, col + i]).strip() for i in range(1,8)])
+            block.append([str(raw.iloc[row, col + i]).strip() for i in range(1, 8)])  # skip 'date' col
         blocks.append(block)
 
     # Reverse blocks: latest first
-    # blocks.reverse()
+    blocks.reverse()
 
     # Pad all blocks to same height
     max_height = max(len(block) for block in blocks)
@@ -47,40 +47,39 @@ try:
         while len(blocks[i]) < max_height:
             blocks[i].append([""] * 7)
 
-    # Create top row with merged date labels
+    # Top row with merged date labels (get actual date from row 1, col 0)
     top_row = []
-    for block in blocks:
-        date = block[0][0]  # first data row's date
+    for col in range(0, num_columns, 10):
+        if pd.isna(raw.iloc[1, col]):  # skip if no date
+            continue
+        date = str(raw.iloc[1, col]).strip()
         top_row.extend([date] + [""] * 6)
-        top_row.extend(["", ""])  # 2 gap columns
+        top_row.extend(["", ""])
 
-    # Create second row with headers
+    # Header row (skip date col)
     header_row = []
     for col in range(0, num_columns, 10):
         if pd.isna(raw.iloc[0, col]):
             continue
-        # Skip first column (date) → use columns 1–7
         header_row.extend([str(raw.iloc[0, col + i]).strip() for i in range(1, 8)])
         header_row.extend(["", ""])
 
-
-    # Create data rows
+    # Data rows
     data_rows = []
-    for row_idx in range(1, max_height):
+    for row_idx in range(max_height):
         row = []
         for block in blocks:
             row.extend(block[row_idx])
             row.extend(["", ""])
         data_rows.append(row)
 
-    # Final data
     final_data = [top_row, header_row] + data_rows
 
     # Push data
     sheet.clear()
     sheet.update("A1", final_data)
 
-    # Merge cells in top row for each date
+    # Merge date headers
     requests = []
     col_index = 0
     for _ in blocks:
@@ -96,16 +95,15 @@ try:
                 "mergeType": "MERGE_ALL"
             }
         })
-        col_index += 9  # 8 data + 2 gap
+        col_index += 9  # 7 data + 2 gap
 
-    # Execute merge requests
     if requests:
         service.spreadsheets().batchUpdate(
             spreadsheetId=SPREADSHEET_ID,
             body={"requests": requests}
         ).execute()
 
-    print(f"✅ Sheet updated with merged headers and {len(data_rows)} data rows.")
+    print(f"✅ Sheet updated with proper headers and {len(data_rows)} data rows.")
 
 except Exception as e:
     print(f"❌ ERROR: {e}")
