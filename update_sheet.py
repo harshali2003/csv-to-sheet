@@ -35,7 +35,11 @@ try:
         for row in range(1, num_rows):  # Skip header row
             if pd.isna(raw.iloc[row, col]):
                 break
-            block.append([str(raw.iloc[row, col + i]).strip() for i in range(1, 8)])  # skip 'date' col
+            block.append([
+    raw.iloc[row, col + i] if pd.notna(raw.iloc[row, col + i]) and str(raw.iloc[row, col + i]).strip().replace('.', '', 1).isdigit()
+    else str(raw.iloc[row, col + i]).strip()
+    for i in range(1, 8)
+])  # skip 'date' col
         blocks.append(block)
 
     # Reverse blocks: latest first
