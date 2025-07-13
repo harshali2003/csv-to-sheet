@@ -9,15 +9,18 @@ CSV_URL = "https://raw.githubusercontent.com/harshali2003/csv-to-sheet/refs/head
 SPREADSHEET_ID = "1_XanKnA9VBUVkF8O729Dp-LK-tuH_4y34-lGKme4b1U"
 CREDENTIALS_FILE = "creds.json"
 
-# Helper function to convert values to numbers if possible
-def parse_value(val):
+def parse_cell(val):
+    """Convert strings to numbers when possible."""
     try:
-        val_str = str(val).strip()
-        if val_str == "":
+        val = str(val).strip()
+        if val == "":
             return ""
-        return int(val_str) if val_str.isdigit() else float(val_str)
+        num = float(val)
+        if num.is_integer():
+            return int(num)
+        return num
     except:
-        return str(val).strip()
+        return str(val)
 
 try:
     # Setup Sheets API
@@ -30,7 +33,6 @@ try:
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
-    # Google API client
     scoped_creds = GoogleCredentials.from_service_account_file(CREDENTIALS_FILE, scopes=scope)
     service = build("sheets", "v4", credentials=scoped_creds)
 
@@ -49,10 +51,8 @@ try:
         for row in range(1, num_rows):  # Skip header row
             if pd.isna(raw.iloc[row, col]):
                 break
-            block.append([parse_value(raw.iloc[row, col + i]) for i in range(1, 8)])  # Skip 'date' column
+            block.append([parse_cell(raw.iloc[row, col + i]) for i in range(1, 8)])  # Skip date column
         blocks.append(block)
-
-   
 
     # Pad all blocks to same height
     max_height = max(len(block) for block in blocks)
@@ -60,10 +60,10 @@ try:
         while len(blocks[i]) < max_height:
             blocks[i].append([""] * 7)
 
-    # Top row with merged date labels (get actual date from row 1, col 0)
+    # Create top row with merged date labels
     top_row = []
     for col in range(0, num_columns, 10):
-        if pd.isna(raw.iloc[1, col]):  # skip if no date
+        if pd.isna(raw.iloc[1, col]):
             continue
         date = str(raw.iloc[1, col]).strip()
         top_row.extend([date] + [""] * 6)
@@ -88,18 +88,13 @@ try:
 
     final_data = [top_row, header_row] + data_rows
 
-    # Push data
-    
-    start_col = 9  # Column J
-    start_row = 0  # Row 1
+    # Push to Google Sheet
+    sheet.clear()
+    sheet.update("A1", final_data)
 
-    range_name = gspread.utils.rowcol_to_a1(start_row + 1, start_col + 1)
-
-    sheet_range = f"{range_name}"
-    sheet.update(sheet_range, final_data)
     # Merge date headers
     requests = []
-    col_index = 9
+    col_index = 0
     for _ in blocks:
         requests.append({
             "mergeCells": {
@@ -113,7 +108,7 @@ try:
                 "mergeType": "MERGE_ALL"
             }
         })
-        col_index += 9  # 7 data + 2 gap
+        col_index += 9  # 7 data + 2 gaps
 
     if requests:
         service.spreadsheets().batchUpdate(
