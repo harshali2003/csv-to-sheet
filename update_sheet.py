@@ -52,8 +52,7 @@ try:
             block.append([parse_value(raw.iloc[row, col + i]) for i in range(1, 8)])  # Skip 'date' column
         blocks.append(block)
 
-    # Reverse blocks: latest first
-    blocks.reverse()
+   
 
     # Pad all blocks to same height
     max_height = max(len(block) for block in blocks)
@@ -90,12 +89,17 @@ try:
     final_data = [top_row, header_row] + data_rows
 
     # Push data
-    sheet.clear()
-    sheet.update("A1", final_data)
+    
+    start_col = 9  # Column J
+    start_row = 0  # Row 1
 
+    range_name = gspread.utils.rowcol_to_a1(start_row + 1, start_col + 1)
+
+    sheet_range = f"{range_name}"
+    sheet.update(sheet_range, final_data)
     # Merge date headers
     requests = []
-    col_index = 0
+    col_index = 9
     for _ in blocks:
         requests.append({
             "mergeCells": {
